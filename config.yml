@@ -1,0 +1,5 @@
+tunnel: 66806db9-9870-424c-b8ce-66b71a39385a
+credentials-file: /Users/thanveer.dev/.cloudflared/66806db9-9870-424c-b8ce-66b71a39385a.json
+
+ingress:
+  - service: http://localhost:8086

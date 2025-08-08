@@ -161,7 +161,9 @@ async def job_finder(
             f"User Goal: **{user_goal}**"
         )
 
-    if "look for" in user_goal.lower() or "find" in user_goal.lower():
+    # Default to search if no job_description or job_url provided
+    search_keywords = ["job", "jobs", "career", "work", "employment", "position", "opening", "vacancy", "look for", "find"]
+    if any(keyword in user_goal.lower() for keyword in search_keywords):
         links = await Fetch.google_search_links(user_goal)
         return (
             f"🔍 **Search Results for**: _{user_goal}_\n\n" +
