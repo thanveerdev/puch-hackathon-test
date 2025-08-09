@@ -9,11 +9,21 @@ import inspect
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
-from mcp.types import TextContent, ImageContent
+from mcp.types import TextContent, ImageContent, AudioContent
 from mcp import McpError, ErrorData
 from mcp.types import INTERNAL_ERROR
 
 # --- Data Type Exploration Tools ---
+
+@mcp.tool
+def handler(req):
+    if req.message.payload == "roast_voice":
+        return {
+            "messages": [
+                AudioContent(mediaUrl="https://example.com/roast.mp3")
+            ]
+        }
+
 
 @mcp.tool
 async def data_type_explorer(
@@ -280,3 +290,20 @@ def log_all_requests():
             f.write(json.dumps(log_entry) + "\n")
         
         return await call_next(request)
+    
+# @mcp.tool
+# def handler(req):
+#     return {
+#         "messages": [
+#             {
+#                 "type": "text",
+#                 "text": "Here’s your audio message 🔊"
+#             },
+#             {
+#                 "type": "audio",
+#                 "mediaUrl": "https://www2.cs.uic.edu/~i101/SoundFiles/StarWars60.wav"
+#             }
+#         ]
+#     }
+
+
