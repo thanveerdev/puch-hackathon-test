@@ -1,5 +1,5 @@
 import asyncio
-from typing import Annotated
+from typing import Annotated, Optional, Any
 import os
 from dotenv import load_dotenv
 from fastmcp import FastMCP
@@ -12,6 +12,10 @@ from pydantic import BaseModel, Field, AnyUrl
 import markdownify
 import httpx
 import readabilipy
+import json
+import base64
+import io
+from datetime import datetime
 
 # --- Load environment variables ---
 load_dotenv()
@@ -117,6 +121,55 @@ class Fetch:
 
         return links or ["<error>No results found.</error>"]
 
+# --- Simple data persistence for vendors and offers ---
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "..", "data"))
+VENDORS_DB_PATH = os.path.abspath(os.path.join(DATA_DIR, "vendors.json"))
+
+
+def ensure_data_dir_exists() -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def load_vendors_db() -> dict[str, Any]:
+    ensure_data_dir_exists()
+    if not os.path.exists(VENDORS_DB_PATH):
+        return {"vendors": []}
+    try:
+        with open(VENDORS_DB_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"vendors": []}
+
+
+def save_vendors_db(db: dict[str, Any]) -> None:
+    ensure_data_dir_exists()
+    tmp_path = VENDORS_DB_PATH + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, VENDORS_DB_PATH)
+
+
+def slugify(text: str) -> str:
+    allowed = "abcdefghijklmnopqrstuvwxyz0123456789-"
+    s = "".join(ch.lower() if ch.isalnum() else "-" for ch in text)
+    while "--" in s:
+        s = s.replace("--", "-")
+    s = s.strip("-")
+    return "".join(ch for ch in s if ch in allowed) or "shop"
+
+
+class Vendor(BaseModel):
+    vendor_id: str
+    name: str
+    slug: str
+    pincode: str
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    tags: list[str] = []
+    discount_text: Optional[str] = None
+    menu_images_base64: list[str] = []
+    created_at: str
+
 # --- MCP Server Setup ---
 mcp = FastMCP(
     "Job Finder MCP Server",
@@ -127,6 +180,131 @@ mcp = FastMCP(
 @mcp.tool
 async def validate() -> str:
     return MY_NUMBER
+
+# --- Tool: vendor_onboard ---
+VendorOnboardDesc = RichToolDescription(
+    description=(
+        "Onboard a local vendor: capture name, pincode, optional address/phone/tags/discount, and one or more menu images (base64)."
+    ),
+    use_when=(
+        "Use when a shop owner wants to add their shop via WhatsApp. Accepts menu images as base64 strings."
+    ),
+    side_effects="Creates or updates vendor in local data store and returns a public URL slug.",
+)
+
+
+@mcp.tool(description=VendorOnboardDesc.model_dump_json())
+async def vendor_onboard(
+    name: Annotated[str, Field(description="Shop name")],
+    pincode: Annotated[str, Field(description="6-digit pincode")],
+    address: Annotated[str | None, Field(description="Address (optional)")] = None,
+    phone: Annotated[str | None, Field(description="Phone/WhatsApp (optional)")] = None,
+    tags: Annotated[str | None, Field(description="Comma-separated tags like bakery, snacks, veg")] = None,
+    discount_text: Annotated[str | None, Field(description="Optional discount description e.g. 10% off on combos")] = None,
+    menu_images_base64: Annotated[list[str] | None, Field(description="List of base64-encoded menu images")] = None,
+) -> str:
+    """
+    Creates or updates a vendor entry identified by (name+pincode) slug. Stores menu images inline for simplicity.
+    Returns a public URL to view the vendor.
+    """
+    if not pincode.isdigit() or len(pincode) not in (5, 6):
+        raise McpError(ErrorData(code=INVALID_PARAMS, message="pincode must be 5 or 6 digits"))
+
+    db = load_vendors_db()
+    vendor_slug = slugify(f"{name}-{pincode}")
+
+    existing: Optional[dict[str, Any]] = next((v for v in db.get("vendors", []) if v.get("slug") == vendor_slug), None)
+
+    tags_list = [t.strip() for t in (tags or "").split(",") if t.strip()] if tags else []
+    images = menu_images_base64 or []
+
+    if existing:
+        # Update fields
+        existing.update({
+            "name": name,
+            "pincode": pincode,
+            "address": address,
+            "phone": phone,
+            "tags": tags_list,
+            "discount_text": discount_text,
+        })
+        if images:
+            existing.setdefault("menu_images_base64", [])
+            existing["menu_images_base64"].extend(images)
+        vendor_id = existing["vendor_id"]
+    else:
+        vendor_id = f"v_{int(datetime.utcnow().timestamp())}"
+        vendor = Vendor(
+            vendor_id=vendor_id,
+            name=name,
+            slug=vendor_slug,
+            pincode=pincode,
+            address=address,
+            phone=phone,
+            tags=tags_list,
+            discount_text=discount_text,
+            menu_images_base64=images,
+            created_at=datetime.utcnow().isoformat() + "Z",
+        )
+        db.setdefault("vendors", []).append(vendor.model_dump())
+
+    save_vendors_db(db)
+    public_url = f"https://example.com/s/{vendor_slug}"
+    return (
+        f"Onboarded: {name} (PIN {pincode}). Public menu: {public_url}\n"
+        f"Add more images anytime by calling vendor_onboard with the same name+pincode."
+    )
+
+
+# --- Tool: discounts_lookup ---
+DiscountsLookupDesc = RichToolDescription(
+    description=(
+        "Find vendors by pincode and optional query (shop name/tag) and show any discount text."
+    ),
+    use_when="Customer asks which shops offer discounts in a pincode or for a specific shop",
+    side_effects=None,
+)
+
+
+@mcp.tool(description=DiscountsLookupDesc.model_dump_json())
+async def discounts_lookup(
+    pincode: Annotated[str, Field(description="5/6-digit pincode to search in")],
+    query: Annotated[str | None, Field(description="Optional search: shop name keyword or tag")] = None,
+    max_results: Annotated[int, Field(description="Max vendors to return")] = 10,
+) -> str:
+    if not pincode.isdigit() or len(pincode) not in (5, 6):
+        raise McpError(ErrorData(code=INVALID_PARAMS, message="pincode must be 5 or 6 digits"))
+
+    db = load_vendors_db()
+    vendors: list[dict[str, Any]] = [v for v in db.get("vendors", []) if v.get("pincode") == pincode]
+
+    if query:
+        q = query.lower()
+        vendors = [
+            v for v in vendors
+            if q in (v.get("name", "").lower())
+            or q in ",".join(v.get("tags", [])).lower()
+            or (v.get("discount_text") or "").lower().__contains__(q)
+        ]
+
+    vendors = vendors[: max(1, min(max_results, 25))]
+
+    if not vendors:
+        return (
+            "No shops with discounts found in this pincode yet."
+            " Add your shop: https://example.com/add and try nearby pincodes."
+        )
+
+    lines = [f"Discounts near PIN {pincode}:"]
+    for v in vendors:
+        discount = v.get("discount_text") or "—"
+        url = f"https://example.com/s/{v.get('slug')}"
+        tags = ", ".join(v.get("tags", []))
+        lines.append(f"- {v.get('name')} ({tags}) — {discount} — {url}")
+
+    more_url = f"https://example.com/p/{pincode}"
+    lines.append(f"More shops: {more_url}")
+    return "\n".join(lines)
 
 # --- Tool: job_finder (now smart!) ---
 JobFinderDescription = RichToolDescription(
