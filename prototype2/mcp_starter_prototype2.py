@@ -547,7 +547,11 @@ async def audio_test_handler(
     log_tool_request("audio_test_handler", message=message)
     return [
         TextContent(type="text", text="🎵 Here's your test audio! Playing Star Wars theme..."),
-        AudioContent(type="audio", mediaUrl="https://www2.cs.uic.edu/~i101/SoundFiles/StarWars60.wav")
+        AudioContent(
+            type="audio", 
+            data="https://www2.cs.uic.edu/~i101/SoundFiles/StarWars60.wav",
+            mimeType="audio/wav"
+        )
     ]
 
 # --- Run MCP Server ---
