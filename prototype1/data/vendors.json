@@ -1,0 +1,28 @@
+{
+  "vendors": [
+    {
+      "vendor_id": "v_seed_1",
+      "name": "Shree Snacks",
+      "slug": "shree-snacks-560001",
+      "pincode": "560001",
+      "address": "MG Road, Bengaluru",
+      "phone": "+91 90000 11111",
+      "tags": ["snacks", "veg", "vada-pav"],
+      "discount_text": "10% off on combo (Vada Pav + Chai)",
+      "menu_images_base64": [],
+      "created_at": "2025-08-08T00:00:00Z"
+    },
+    {
+      "vendor_id": "v_seed_2",
+      "name": "Pav King",
+      "slug": "pav-king-560001",
+      "pincode": "560001",
+      "address": "Church Street",
+      "phone": "+91 90000 22222",
+      "tags": ["snacks", "vada-pav"],
+      "discount_text": "Buy 2 get 1 free (Mon-Fri)",
+      "menu_images_base64": [],
+      "created_at": "2025-08-08T00:00:00Z"
+    }
+  ]
+}

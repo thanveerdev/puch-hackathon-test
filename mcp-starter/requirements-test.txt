@@ -1,0 +1,5 @@
+# Additional dependencies for testing
+httpx>=0.24.0
+pillow>=10.0.0
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
